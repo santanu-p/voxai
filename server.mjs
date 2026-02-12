@@ -30,6 +30,19 @@ const CONFIG = {
         .filter(Boolean)
 };
 
+function safeWrite(stream, line) {
+    if (!stream || typeof stream.write !== 'function') {
+        return;
+    }
+    try {
+        stream.write(`${line}\n`);
+    } catch (error) {
+        if (error?.code !== 'EPIPE') {
+            // Ignore non-fatal logger transport errors to keep relay alive.
+        }
+    }
+}
+
 function log(level, message, fields = {}) {
     const payload = {
         timestamp: new Date().toISOString(),
@@ -39,10 +52,39 @@ function log(level, message, fields = {}) {
     };
     const line = JSON.stringify(payload);
     if (level === 'error' || level === 'warn') {
-        console.error(line);
+        safeWrite(process.stderr, line);
     } else {
-        console.log(line);
+        safeWrite(process.stdout, line);
     }
+}
+
+function setupProcessErrorGuards() {
+    const ignoreEpipe = (error) => {
+        if (error?.code !== 'EPIPE') {
+            log('warn', 'Log stream error', { error: normalizeError(error).message });
+        }
+    };
+
+    if (process.stdout?.on) {
+        process.stdout.on('error', ignoreEpipe);
+    }
+    if (process.stderr?.on) {
+        process.stderr.on('error', ignoreEpipe);
+    }
+
+    process.on('uncaughtException', (error) => {
+        if (error?.code === 'EPIPE') {
+            return;
+        }
+        log('error', 'Uncaught exception', { error: normalizeError(error).message });
+        process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason) => {
+        log('error', 'Unhandled promise rejection', {
+            error: normalizeError(reason).message
+        });
+    });
 }
 
 function validateConfig() {
@@ -284,6 +326,7 @@ function stopGeminiSession(state) {
 }
 
 validateConfig();
+setupProcessErrorGuards();
 
 const app = next({ dev, hostname: CONFIG.host, port: CONFIG.port });
 const handle = app.getRequestHandler();
