@@ -45,24 +45,37 @@ function normalizeInstruction(value) {
 }
 
 function isAllowedOrigin(req) {
+    if (process.env.NODE_ENV !== 'production') {
+        return true;
+    }
+
     const origin = req.headers.origin;
     if (!origin) {
         return true;
     }
 
-    const host = req.headers.host;
-    if (!host) {
+    const rawHost = req.headers.host;
+    const rawForwardedHost = req.headers['x-forwarded-host'];
+    const forwardedHost = Array.isArray(rawForwardedHost)
+        ? rawForwardedHost[0]
+        : (rawForwardedHost || '').split(',')[0].trim();
+
+    const allowedHosts = [rawHost, forwardedHost]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase());
+
+    if (allowedHosts.length === 0) {
         return false;
     }
 
     let originHost = '';
     try {
-        originHost = new URL(origin).host;
+        originHost = new URL(origin).host.toLowerCase();
     } catch {
         return false;
     }
 
-    if (originHost === host) {
+    if (allowedHosts.includes(originHost)) {
         return true;
     }
 
