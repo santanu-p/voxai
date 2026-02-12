@@ -20,9 +20,11 @@ Realtime voice AI assistant using Next.js + a server-side WebSocket relay for Ge
 1. Copy `.env.example` to `.env.local`.
 2. Set `GEMINI_API_KEY`.
 3. For production, set `VOXAI_ALLOWED_ORIGINS` to exact origins.
+4. If frontend is deployed on Vercel, set `NEXT_PUBLIC_RELAY_WS_URL` to an external relay websocket URL.
 
 ## Environment Variables
 - `GEMINI_API_KEY` (required): Gemini Developer API key.
+- `NEXT_PUBLIC_RELAY_WS_URL` (recommended for Vercel): external websocket relay URL, e.g. `wss://relay.yourdomain.com/api/live`.
 - `VOXAI_ALLOWED_ORIGINS` (required in production): comma-separated exact origins allowed to open relay websocket.
 - `HOST` (optional, default `0.0.0.0`): bind host.
 - `PORT` (optional, default `3000`): bind port.
@@ -43,6 +45,14 @@ Realtime voice AI assistant using Next.js + a server-side WebSocket relay for Ge
 
 Or one command:
 - `npm run start:prod`
+
+## Vercel Deployment
+Vercel does not run this custom websocket relay server (`server.mjs`) for your app route traffic.
+Use split deployment:
+1. Deploy frontend to Vercel.
+2. Deploy relay server (`server.mjs`) on a websocket-capable host (Railway/Fly/Render/VM).
+3. Set `NEXT_PUBLIC_RELAY_WS_URL` in Vercel project env to the relay URL (`wss://.../api/live`).
+4. Add your Vercel frontend origin to relay `VOXAI_ALLOWED_ORIGINS`.
 
 ## Docker
 Build:

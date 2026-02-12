@@ -851,6 +851,10 @@ textarea::placeholder {
   color: var(--success);
 }
 
+.helper-text-warning {
+  color: var(--warning);
+}
+
 .history-actions {
   display: flex;
   gap: var(--spacing-sm);
