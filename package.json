@@ -2,10 +2,14 @@
   "name": "voxai",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "node server.mjs --dev",
     "build": "next build",
     "start": "node server.mjs",
+    "start:prod": "npm run build && node server.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
