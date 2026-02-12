@@ -562,6 +562,38 @@ body {
   padding: var(--spacing-xl) 0;
 }
 
+.ptt-btn {
+  min-width: 220px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color-hover);
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: var(--transition-base);
+}
+
+.ptt-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--accent-secondary);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+.ptt-btn.active {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.65);
+  color: #d1fae5;
+}
+
+.ptt-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Main Action Button - Modern Pill */
 .action-btn {
   position: relative;
@@ -702,7 +734,7 @@ body {
 
 .modal {
   width: 90%;
-  max-width: 480px;
+  max-width: 560px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
@@ -781,6 +813,7 @@ body {
   color: var(--text-secondary);
 }
 
+select,
 textarea {
   width: 100%;
   padding: var(--spacing-md);
@@ -790,10 +823,14 @@ textarea {
   color: var(--text-primary);
   font-size: 0.875rem;
   font-family: inherit;
-  resize: vertical;
   transition: var(--transition-fast);
 }
 
+textarea {
+  resize: vertical;
+}
+
+select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--accent-primary);
@@ -812,6 +849,35 @@ textarea::placeholder {
 
 .helper-text-success {
   color: var(--success);
+}
+
+.history-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass-light);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.history-item-meta {
+  color: var(--text-tertiary);
+  font-size: 0.74rem;
 }
 
 .helper-text a {
@@ -937,6 +1003,11 @@ textarea::placeholder {
   .action-btn {
     min-width: 200px;
     height: 56px;
+  }
+
+  .ptt-btn {
+    min-width: 200px;
+    height: 50px;
   }
 
   .transcript-list {

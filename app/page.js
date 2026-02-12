@@ -7,8 +7,27 @@ import { AudioVisualizer } from '@/lib/audioVisualizer';
 import { GeminiLive } from '@/lib/geminiLive';
 
 const READY_STATUS_MESSAGE = 'Click below to start talking with Vera';
+const SETTINGS_STORAGE_KEY = 'voxai-settings';
+const HISTORY_STORAGE_KEY = 'voxai-history';
+const MAX_HISTORY_ITEMS = 30;
+const MAX_TRANSCRIPT_ITEMS = 120;
+const DEFAULT_VOICE_NAME = 'Aoede';
+const DEFAULT_MODE = 'vad';
+const VOICE_OPTIONS = [
+    { value: 'Aoede', label: 'Aoede (Balanced)' },
+    { value: 'Kore', label: 'Kore (Clear)' },
+    { value: 'Leda', label: 'Leda (Warm)' },
+    { value: 'Puck', label: 'Puck (Energetic)' },
+    { value: 'Zephyr', label: 'Zephyr (Bright)' }
+];
+
 const DEFAULT_SYSTEM_INSTRUCTION =
     'You are Vera, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally with a friendly and professional tone. Be concise but thorough in your responses. Show personality and empathy in your interactions.';
+const DEFAULT_SETTINGS = {
+    systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
+    voiceName: DEFAULT_VOICE_NAME,
+    conversationMode: DEFAULT_MODE
+};
 
 function getErrorMessage(error) {
     if (error instanceof Error && error.message) {
@@ -20,6 +39,76 @@ function getErrorMessage(error) {
     return 'An unexpected error occurred.';
 }
 
+function isMobileBrowser() {
+    if (typeof navigator === 'undefined') {
+        return false;
+    }
+    return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function isSecureMicContext() {
+    if (typeof window === 'undefined') {
+        return true;
+    }
+    if (window.isSecureContext) {
+        return true;
+    }
+    const host = window.location.hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+}
+
+function normalizeConversationMode(value) {
+    return value === 'push-to-talk' ? 'push-to-talk' : 'vad';
+}
+
+function normalizeVoiceName(value) {
+    return VOICE_OPTIONS.some((voice) => voice.value === value) ? value : DEFAULT_VOICE_NAME;
+}
+
+function formatTimestamp(value) {
+    try {
+        return new Date(value).toLocaleString();
+    } catch {
+        return 'Unknown time';
+    }
+}
+
+function buildHistoryText(conversations) {
+    if (!Array.isArray(conversations) || conversations.length === 0) {
+        return 'No conversation history found.';
+    }
+
+    return conversations.map((conversation, index) => {
+        const header = [
+            `Conversation ${index + 1}`,
+            `Started: ${formatTimestamp(conversation.startedAt)}`,
+            `Ended: ${formatTimestamp(conversation.endedAt)}`,
+            `Voice: ${conversation.voiceName || DEFAULT_VOICE_NAME}`,
+            `Mode: ${conversation.conversationMode || DEFAULT_MODE}`,
+            `Duration: ${Math.round((conversation.durationMs || 0) / 1000)}s`,
+            ''
+        ].join('\n');
+
+        const transcript = (conversation.transcript || [])
+            .map((entry) => `[${entry.speaker === 'user' ? 'You' : 'Vera'}] ${entry.text}`)
+            .join('\n');
+
+        return `${header}${transcript}`;
+    }).join('\n\n----------------------------------------\n\n');
+}
+
+function downloadFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
 export default function Home() {
     const [isConversationActive, setIsConversationActive] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState('disconnected');
@@ -28,12 +117,12 @@ export default function Home() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isAiSpeaking, setIsAiSpeaking] = useState(false);
     const [isListening, setIsListening] = useState(false);
+    const [isPushToTalkPressed, setIsPushToTalkPressed] = useState(false);
     const [toasts, setToasts] = useState([]);
     const [transcripts, setTranscripts] = useState([]);
-    const [settings, setSettings] = useState({
-        systemInstruction: DEFAULT_SYSTEM_INSTRUCTION
-    });
-    const [tempSettings, setTempSettings] = useState(settings);
+    const [conversationHistory, setConversationHistory] = useState([]);
+    const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+    const [tempSettings, setTempSettings] = useState(DEFAULT_SETTINGS);
 
     const audioCaptureRef = useRef(null);
     const audioPlaybackRef = useRef(null);
@@ -43,23 +132,58 @@ export default function Home() {
     const transcriptEndRef = useRef(null);
     const conversationActiveRef = useRef(false);
     const stopInProgressRef = useRef(false);
+    const pushToTalkPressedRef = useRef(false);
+    const conversationStartedAtRef = useRef(null);
+    const conversationPersistedRef = useRef(false);
+    const transcriptsRef = useRef([]);
+    const settingsRef = useRef(settings);
     const toastCounterRef = useRef(0);
 
     useEffect(() => {
+        transcriptsRef.current = transcripts;
+    }, [transcripts]);
+
+    useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
+
+    useEffect(() => {
         try {
-            const saved = localStorage.getItem('voxai-settings');
-            if (!saved) {
-                return;
-            }
-            const parsed = JSON.parse(saved);
-            if (parsed?.systemInstruction) {
-                setSettings(parsed);
-                setTempSettings(parsed);
+            const savedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+            if (savedSettings) {
+                const parsedSettings = JSON.parse(savedSettings);
+                const merged = {
+                    systemInstruction: parsedSettings?.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION,
+                    voiceName: normalizeVoiceName(parsedSettings?.voiceName),
+                    conversationMode: normalizeConversationMode(parsedSettings?.conversationMode)
+                };
+                setSettings(merged);
+                setTempSettings(merged);
             }
         } catch (error) {
             console.error('Failed to load settings:', error);
         }
+
+        try {
+            const savedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
+            if (savedHistory) {
+                const parsedHistory = JSON.parse(savedHistory);
+                if (Array.isArray(parsedHistory)) {
+                    setConversationHistory(parsedHistory);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load history:', error);
+        }
     }, []);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(conversationHistory));
+        } catch (error) {
+            console.error('Failed to persist conversation history:', error);
+        }
+    }, [conversationHistory]);
 
     const showToast = useCallback((message, type = 'info') => {
         toastCounterRef.current += 1;
@@ -87,12 +211,13 @@ export default function Home() {
                 ...prev,
                 {
                     id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                    timestamp: Date.now(),
                     speaker,
                     text: normalizedText
                 }
             ];
 
-            return next.slice(-60);
+            return next.slice(-MAX_TRANSCRIPT_ITEMS);
         });
     }, []);
 
@@ -109,6 +234,7 @@ export default function Home() {
 
     const cleanupResources = useCallback(({ disconnectGemini = true } = {}) => {
         conversationActiveRef.current = false;
+        pushToTalkPressedRef.current = false;
 
         visualizerRef.current?.stop();
 
@@ -160,6 +286,38 @@ export default function Home() {
         };
     }, [isSettingsOpen]);
 
+    const persistCurrentConversation = useCallback((reason = 'ended') => {
+        if (conversationPersistedRef.current) {
+            return;
+        }
+
+        const transcriptSnapshot = transcriptsRef.current;
+        if (!Array.isArray(transcriptSnapshot) || transcriptSnapshot.length === 0) {
+            return;
+        }
+
+        const endedAt = Date.now();
+        const startedAt = conversationStartedAtRef.current || endedAt;
+
+        const conversation = {
+            id: `conv-${endedAt}-${Math.random().toString(36).slice(2, 8)}`,
+            startedAt,
+            endedAt,
+            reason,
+            durationMs: Math.max(0, endedAt - startedAt),
+            voiceName: settingsRef.current.voiceName || DEFAULT_VOICE_NAME,
+            conversationMode: settingsRef.current.conversationMode || DEFAULT_MODE,
+            transcript: transcriptSnapshot.map((entry) => ({
+                timestamp: entry.timestamp || endedAt,
+                speaker: entry.speaker === 'user' ? 'user' : 'ai',
+                text: entry.text
+            }))
+        };
+
+        setConversationHistory((prev) => [conversation, ...prev].slice(0, MAX_HISTORY_ITEMS));
+        conversationPersistedRef.current = true;
+    }, []);
+
     const finishStoppedState = useCallback((message = READY_STATUS_MESSAGE) => {
         setIsConversationActive(false);
         setConnectionStatus('disconnected');
@@ -167,13 +325,15 @@ export default function Home() {
         setIsListening(false);
         setIsAiSpeaking(false);
         setIsMuted(false);
+        setIsPushToTalkPressed(false);
     }, []);
 
     const stopConversation = useCallback((options = {}) => {
         const {
             showEndedToast = true,
             disconnectGemini = true,
-            nextStatusMessage = READY_STATUS_MESSAGE
+            nextStatusMessage = READY_STATUS_MESSAGE,
+            reason = 'ended'
         } = options;
 
         if (stopInProgressRef.current) {
@@ -182,6 +342,7 @@ export default function Home() {
 
         stopInProgressRef.current = true;
         setConnectionStatus('disconnecting');
+        persistCurrentConversation(reason);
         cleanupResources({ disconnectGemini });
         finishStoppedState(nextStatusMessage);
 
@@ -190,25 +351,71 @@ export default function Home() {
         }
 
         stopInProgressRef.current = false;
-    }, [cleanupResources, finishStoppedState, showToast]);
+    }, [cleanupResources, finishStoppedState, persistCurrentConversation, showToast]);
 
     const startConversation = useCallback(async () => {
         if (isConversationActive || connectionStatus === 'connecting' || stopInProgressRef.current) {
             return;
         }
 
+        if (!isSecureMicContext()) {
+            showToast('Microphone access on mobile requires HTTPS. Open this site using https://.', 'error');
+            return;
+        }
+
         stopInProgressRef.current = false;
         setConnectionStatus('connecting');
-        setStatusMessage('Connecting to Vera...');
+        setStatusMessage('Starting microphone...');
         setIsListening(false);
         setIsAiSpeaking(false);
         setIsMuted(false);
+        setIsPushToTalkPressed(false);
         setTranscripts([]);
+        conversationPersistedRef.current = false;
+        conversationStartedAtRef.current = Date.now();
+        pushToTalkPressedRef.current = false;
 
         try {
-            const hasMicrophone = await AudioCapture.checkMicrophoneAvailable();
-            if (!hasMicrophone) {
-                throw new Error('No microphone detected. Connect a microphone and try again.');
+            audioCaptureRef.current = new AudioCapture({
+                onAudioData: (data) => {
+                    if (geminiRef.current?.isActive()) {
+                        geminiRef.current.sendAudio(data);
+                    }
+                },
+                onError: (error) => {
+                    if (error?.name === 'NotAllowedError') {
+                        if (isMobileBrowser()) {
+                            showToast('Microphone access is blocked. Allow mic permission in browser site settings and reload.', 'error');
+                        } else {
+                            showToast('Microphone access denied. Please allow microphone access.', 'error');
+                        }
+                    } else {
+                        showToast('Failed to access microphone.', 'error');
+                    }
+                },
+                onStateChange: (state) => {
+                    if (!conversationActiveRef.current) {
+                        return;
+                    }
+
+                    if (state === 'muted') {
+                        setIsListening(false);
+                        if (settingsRef.current.conversationMode === 'push-to-talk') {
+                            setStatusMessage('Hold to talk and speak.');
+                        }
+                    } else if (state === 'capturing') {
+                        if (settingsRef.current.conversationMode === 'push-to-talk') {
+                            setIsListening(pushToTalkPressedRef.current);
+                        } else {
+                            setIsListening(true);
+                        }
+                    }
+                }
+            });
+
+            const captureStarted = await audioCaptureRef.current.start();
+            if (!captureStarted) {
+                throw new Error('Failed to start audio capture');
             }
 
             audioPlaybackRef.current = new AudioPlayback({
@@ -219,14 +426,38 @@ export default function Home() {
                         setStatusMessage('Vera is speaking...');
                     } else {
                         setIsAiSpeaking(false);
-                        if (conversationActiveRef.current) {
+                        if (!conversationActiveRef.current) {
+                            return;
+                        }
+
+                        if (settingsRef.current.conversationMode === 'push-to-talk') {
+                            if (pushToTalkPressedRef.current) {
+                                setIsListening(true);
+                                setStatusMessage('Listening while held...');
+                            } else {
+                                setIsListening(false);
+                                setStatusMessage('Hold to talk and speak.');
+                            }
+                        } else {
                             setIsListening(true);
                             setStatusMessage('Listening...');
                         }
                     }
                 },
                 onPlaybackEnd: () => {
-                    if (conversationActiveRef.current) {
+                    if (!conversationActiveRef.current) {
+                        return;
+                    }
+
+                    if (settingsRef.current.conversationMode === 'push-to-talk') {
+                        if (pushToTalkPressedRef.current) {
+                            setIsListening(true);
+                            setStatusMessage('Listening while held...');
+                        } else {
+                            setIsListening(false);
+                            setStatusMessage('Hold to talk and speak.');
+                        }
+                    } else {
                         setIsListening(true);
                         setStatusMessage('Listening...');
                     }
@@ -235,13 +466,20 @@ export default function Home() {
 
             geminiRef.current = new GeminiLive({
                 systemInstruction: settings.systemInstruction,
+                voiceName: settings.voiceName,
+                conversationMode: settings.conversationMode,
                 onConnected: () => {
                     if (stopInProgressRef.current) {
                         return;
                     }
                     setConnectionStatus('connected');
-                    setStatusMessage('Listening...');
-                    setIsListening(true);
+                    if (settingsRef.current.conversationMode === 'push-to-talk') {
+                        setStatusMessage('Hold to talk and speak.');
+                        setIsListening(false);
+                    } else {
+                        setStatusMessage('Listening...');
+                        setIsListening(true);
+                    }
                     showToast('Connected to Vera', 'success');
                 },
                 onDisconnected: () => {
@@ -250,6 +488,7 @@ export default function Home() {
                     }
 
                     stopInProgressRef.current = true;
+                    persistCurrentConversation('connection-lost');
                     cleanupResources({ disconnectGemini: false });
                     finishStoppedState('Connection lost. Click below to reconnect.');
                     showToast('Connection lost. Start a new call to continue.', 'warning');
@@ -261,7 +500,19 @@ export default function Home() {
                 onInterrupted: () => {
                     audioPlaybackRef.current?.interrupt();
                     setIsAiSpeaking(false);
-                    if (conversationActiveRef.current) {
+                    if (!conversationActiveRef.current) {
+                        return;
+                    }
+
+                    if (settingsRef.current.conversationMode === 'push-to-talk') {
+                        if (pushToTalkPressedRef.current) {
+                            setIsListening(true);
+                            setStatusMessage('Listening while held...');
+                        } else {
+                            setIsListening(false);
+                            setStatusMessage('Hold to talk and speak.');
+                        }
+                    } else {
                         setIsListening(true);
                         setStatusMessage('Listening...');
                     }
@@ -277,34 +528,16 @@ export default function Home() {
 
             const connected = await geminiRef.current.connect();
             if (!connected) {
-                throw new Error('Failed to connect to Vera');
+                throw new Error('Failed to connect to Vera relay');
             }
 
-            audioCaptureRef.current = new AudioCapture({
-                onAudioData: (data) => {
-                    if (geminiRef.current?.isActive()) {
-                        geminiRef.current.sendAudio(data);
-                    }
-                },
-                onError: (error) => {
-                    if (error?.name === 'NotAllowedError') {
-                        showToast('Microphone access denied. Please allow microphone access.', 'error');
-                    } else {
-                        showToast('Failed to access microphone.', 'error');
-                    }
-                },
-                onStateChange: (state) => {
-                    if (state === 'muted') {
-                        setIsListening(false);
-                    } else if (state === 'capturing' && conversationActiveRef.current) {
-                        setIsListening(true);
-                    }
-                }
-            });
-
-            const captureStarted = await audioCaptureRef.current.start();
-            if (!captureStarted) {
-                throw new Error('Failed to start audio capture');
+            if (settingsRef.current.conversationMode === 'push-to-talk') {
+                audioCaptureRef.current.setMuted(true);
+                setIsMuted(true);
+                setIsListening(false);
+                setStatusMessage('Hold to talk and speak.');
+            } else {
+                setStatusMessage('Listening...');
             }
 
             setIsConversationActive(true);
@@ -332,49 +565,132 @@ export default function Home() {
         connectionStatus,
         finishStoppedState,
         isConversationActive,
+        persistCurrentConversation,
+        settings.conversationMode,
         settings.systemInstruction,
+        settings.voiceName,
         showToast
     ]);
+
+    const handlePushToTalkDown = useCallback((event) => {
+        event.preventDefault();
+        if (!isConversationActive || settings.conversationMode !== 'push-to-talk') {
+            return;
+        }
+        if (!audioCaptureRef.current || pushToTalkPressedRef.current) {
+            return;
+        }
+
+        pushToTalkPressedRef.current = true;
+        setIsPushToTalkPressed(true);
+        audioCaptureRef.current.setMuted(false);
+        setIsMuted(false);
+        setIsListening(true);
+        setStatusMessage('Listening while held...');
+    }, [isConversationActive, settings.conversationMode]);
+
+    const handlePushToTalkUp = useCallback((event) => {
+        if (event) {
+            event.preventDefault();
+        }
+        if (!audioCaptureRef.current || !pushToTalkPressedRef.current) {
+            return;
+        }
+
+        pushToTalkPressedRef.current = false;
+        setIsPushToTalkPressed(false);
+        audioCaptureRef.current.setMuted(true);
+        setIsMuted(true);
+        setIsListening(false);
+
+        if (conversationActiveRef.current) {
+            setStatusMessage(isAiSpeaking ? 'Vera is speaking...' : 'Hold to talk and speak.');
+        }
+    }, [isAiSpeaking]);
 
     const toggleMute = useCallback(() => {
         if (!audioCaptureRef.current) {
             return;
         }
 
+        if (settings.conversationMode === 'push-to-talk') {
+            showToast('Push-to-talk mode is active. Use the Hold to Talk button.', 'info');
+            return;
+        }
+
         const muted = audioCaptureRef.current.toggleMute();
         setIsMuted(muted);
         showToast(muted ? 'Microphone muted' : 'Microphone unmuted', 'info');
-    }, [showToast]);
+    }, [settings.conversationMode, showToast]);
 
     const clearTranscript = useCallback(() => {
         setTranscripts([]);
     }, []);
 
+    const exportConversationHistoryAsJson = useCallback(() => {
+        if (conversationHistory.length === 0) {
+            showToast('No conversation history to export.', 'warning');
+            return;
+        }
+
+        downloadFile(
+            `voxai-history-${Date.now()}.json`,
+            JSON.stringify(conversationHistory, null, 2),
+            'application/json'
+        );
+        showToast('History exported as JSON.', 'success');
+    }, [conversationHistory, showToast]);
+
+    const exportConversationHistoryAsText = useCallback(() => {
+        if (conversationHistory.length === 0) {
+            showToast('No conversation history to export.', 'warning');
+            return;
+        }
+
+        downloadFile(
+            `voxai-history-${Date.now()}.txt`,
+            buildHistoryText(conversationHistory),
+            'text/plain'
+        );
+        showToast('History exported as text.', 'success');
+    }, [conversationHistory, showToast]);
+
+    const clearConversationHistory = useCallback(() => {
+        const confirmed = window.confirm('Clear all saved conversation history?');
+        if (!confirmed) {
+            return;
+        }
+
+        setConversationHistory([]);
+        showToast('Conversation history cleared.', 'info');
+    }, [showToast]);
+
     const saveSettings = useCallback(() => {
-        const nextInstruction = tempSettings.systemInstruction.trim() || DEFAULT_SYSTEM_INSTRUCTION;
         const nextSettings = {
-            ...tempSettings,
-            systemInstruction: nextInstruction
+            systemInstruction: tempSettings.systemInstruction.trim() || DEFAULT_SYSTEM_INSTRUCTION,
+            voiceName: normalizeVoiceName(tempSettings.voiceName),
+            conversationMode: normalizeConversationMode(tempSettings.conversationMode)
         };
 
         setSettings(nextSettings);
         setTempSettings(nextSettings);
 
         try {
-            localStorage.setItem('voxai-settings', JSON.stringify(nextSettings));
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextSettings));
         } catch (error) {
             console.error('Failed to save settings:', error);
         }
 
         setIsSettingsOpen(false);
         if (isConversationActive) {
-            showToast('Settings saved. Restart the call to apply personality changes.', 'info');
+            showToast('Settings saved. Restart the call to apply new mode and voice.', 'info');
         } else {
             showToast('Settings saved', 'success');
         }
     }, [isConversationActive, showToast, tempSettings]);
 
     const isBusy = connectionStatus === 'connecting' || connectionStatus === 'disconnecting';
+    const isPushToTalkMode = settings.conversationMode === 'push-to-talk';
     const statusText = connectionStatus === 'connected'
         ? 'Connected'
         : connectionStatus === 'connecting'
@@ -486,7 +802,7 @@ export default function Home() {
                 <section className="control-panel">
                     <button
                         className={`action-btn ${isConversationActive ? 'active' : ''}`}
-                        onClick={isConversationActive ? stopConversation : startConversation}
+                        onClick={isConversationActive ? () => stopConversation() : startConversation}
                         disabled={isBusy}
                         aria-busy={isBusy}
                     >
@@ -501,14 +817,42 @@ export default function Home() {
                         <div className="btn-ripple"></div>
                     </button>
 
+                    {isPushToTalkMode && (
+                        <button
+                            className={`ptt-btn ${isPushToTalkPressed ? 'active' : ''}`}
+                            disabled={!isConversationActive || isBusy}
+                            onPointerDown={handlePushToTalkDown}
+                            onPointerUp={handlePushToTalkUp}
+                            onPointerCancel={handlePushToTalkUp}
+                            onPointerLeave={() => {
+                                if (isPushToTalkPressed) {
+                                    handlePushToTalkUp();
+                                }
+                            }}
+                            onKeyDown={(event) => {
+                                if ((event.key === ' ' || event.key === 'Enter') && !isPushToTalkPressed) {
+                                    handlePushToTalkDown(event);
+                                }
+                            }}
+                            onKeyUp={(event) => {
+                                if (event.key === ' ' || event.key === 'Enter') {
+                                    handlePushToTalkUp(event);
+                                }
+                            }}
+                            aria-pressed={isPushToTalkPressed}
+                        >
+                            {isPushToTalkPressed ? 'Release to Stop' : 'Hold to Talk'}
+                        </button>
+                    )}
+
                     <div className="secondary-controls">
                         <button
                             className={`control-btn ${isMuted ? 'muted' : ''}`}
                             onClick={toggleMute}
-                            title="Mute microphone"
+                            title={isPushToTalkMode ? 'Push-to-talk controls microphone state' : 'Mute microphone'}
                             aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                             aria-pressed={isMuted}
-                            disabled={!isConversationActive}
+                            disabled={!isConversationActive || isPushToTalkMode}
                         >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 {isMuted ? (
@@ -565,9 +909,43 @@ export default function Home() {
                         <div className="form-group">
                             <label>API Status</label>
                             <p className="helper-text helper-text-success">
-                                Secured through a server-side token endpoint.
+                                Realtime relay enabled. API key never leaves the server.
                             </p>
                         </div>
+
+                        <div className="form-group">
+                            <label htmlFor="voiceName">Voice</label>
+                            <select
+                                id="voiceName"
+                                value={tempSettings.voiceName}
+                                onChange={event => setTempSettings({ ...tempSettings, voiceName: event.target.value })}
+                            >
+                                {VOICE_OPTIONS.map((voice) => (
+                                    <option key={voice.value} value={voice.value}>
+                                        {voice.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label htmlFor="conversationMode">Conversation Mode</label>
+                            <select
+                                id="conversationMode"
+                                value={tempSettings.conversationMode}
+                                onChange={event => setTempSettings({
+                                    ...tempSettings,
+                                    conversationMode: normalizeConversationMode(event.target.value)
+                                })}
+                            >
+                                <option value="vad">VAD (Hands-Free)</option>
+                                <option value="push-to-talk">Push-to-Talk</option>
+                            </select>
+                            <p className="helper-text">
+                                Use VAD for always-listening flow, or Push-to-Talk for explicit mic control.
+                            </p>
+                        </div>
+
                         <div className="form-group">
                             <label htmlFor="systemInstruction">Vera&apos;s Personality</label>
                             <textarea
@@ -580,6 +958,35 @@ export default function Home() {
                             <p className="helper-text">
                                 Customize how Vera responds and interacts with you.
                             </p>
+                        </div>
+
+                        <div className="form-group">
+                            <label>Conversation History ({conversationHistory.length})</label>
+                            <div className="history-actions">
+                                <button className="btn btn-secondary" onClick={exportConversationHistoryAsJson} disabled={conversationHistory.length === 0}>
+                                    Export JSON
+                                </button>
+                                <button className="btn btn-secondary" onClick={exportConversationHistoryAsText} disabled={conversationHistory.length === 0}>
+                                    Export Text
+                                </button>
+                                <button className="btn btn-secondary" onClick={clearConversationHistory} disabled={conversationHistory.length === 0}>
+                                    Clear
+                                </button>
+                            </div>
+                            <div className="history-list">
+                                {conversationHistory.length === 0 ? (
+                                    <p className="helper-text">No saved conversations yet.</p>
+                                ) : (
+                                    conversationHistory.slice(0, 4).map(item => (
+                                        <div key={item.id} className="history-item">
+                                            <span>{formatTimestamp(item.startedAt)}</span>
+                                            <span className="history-item-meta">
+                                                {item.voiceName || DEFAULT_VOICE_NAME} / {item.conversationMode || DEFAULT_MODE} / {item.transcript?.length || 0} lines
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     </div>
                     <div className="modal-footer">
