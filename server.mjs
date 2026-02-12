@@ -55,13 +55,14 @@ function isAllowedOrigin(req) {
         return false;
     }
 
-    const forwardedProto = req.headers['x-forwarded-proto'];
-    const protocol = typeof forwardedProto === 'string'
-        ? forwardedProto.split(',')[0].trim()
-        : 'http';
-    const expected = `${protocol}://${host}`;
+    let originHost = '';
+    try {
+        originHost = new URL(origin).host;
+    } catch {
+        return false;
+    }
 
-    if (origin === expected) {
+    if (originHost === host) {
         return true;
     }
 
@@ -70,7 +71,11 @@ function isAllowedOrigin(req) {
         .map((value) => value.trim())
         .filter(Boolean);
 
-    return extraAllowList.includes(origin);
+    if (extraAllowList.includes(origin)) {
+        return true;
+    }
+
+    return false;
 }
 
 function forwardGeminiMessage(ws, message) {
@@ -336,6 +341,11 @@ server.on('upgrade', (req, socket, head) => {
 
     if (pathname === '/api/live') {
         if (!isAllowedOrigin(req)) {
+            console.warn('Blocked websocket origin:', {
+                origin: req.headers.origin,
+                host: req.headers.host,
+                forwardedProto: req.headers['x-forwarded-proto']
+            });
             socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
             socket.destroy();
             return;
