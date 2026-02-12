@@ -6,98 +6,217 @@ import { AudioPlayback } from '@/lib/audioPlayback';
 import { AudioVisualizer } from '@/lib/audioVisualizer';
 import { GeminiLive } from '@/lib/geminiLive';
 
+const READY_STATUS_MESSAGE = 'Click below to start talking with Vera';
+const DEFAULT_SYSTEM_INSTRUCTION =
+    'You are Vera, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally with a friendly and professional tone. Be concise but thorough in your responses. Show personality and empathy in your interactions.';
+
+function getErrorMessage(error) {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+    if (typeof error === 'string' && error) {
+        return error;
+    }
+    return 'An unexpected error occurred.';
+}
+
 export default function Home() {
-    // State
     const [isConversationActive, setIsConversationActive] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState('disconnected');
-    const [statusMessage, setStatusMessage] = useState('Click below to start talking with Véra');
+    const [statusMessage, setStatusMessage] = useState(READY_STATUS_MESSAGE);
     const [isMuted, setIsMuted] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isAiSpeaking, setIsAiSpeaking] = useState(false);
     const [isListening, setIsListening] = useState(false);
     const [toasts, setToasts] = useState([]);
+    const [transcripts, setTranscripts] = useState([]);
     const [settings, setSettings] = useState({
-        systemInstruction: 'You are Véra, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally, with a friendly yet professional tone. Be concise but thorough in your responses. Show personality and empathy in your interactions.'
+        systemInstruction: DEFAULT_SYSTEM_INSTRUCTION
     });
     const [tempSettings, setTempSettings] = useState(settings);
 
-    // Refs
     const audioCaptureRef = useRef(null);
     const audioPlaybackRef = useRef(null);
     const visualizerRef = useRef(null);
     const geminiRef = useRef(null);
     const canvasRef = useRef(null);
-    const visualizerContainerRef = useRef(null);
+    const transcriptEndRef = useRef(null);
     const conversationActiveRef = useRef(false);
+    const stopInProgressRef = useRef(false);
+    const toastCounterRef = useRef(0);
 
-    // Load settings from localStorage on mount
     useEffect(() => {
-        const saved = localStorage.getItem('voxai-settings');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
+        try {
+            const saved = localStorage.getItem('voxai-settings');
+            if (!saved) {
+                return;
+            }
+            const parsed = JSON.parse(saved);
+            if (parsed?.systemInstruction) {
                 setSettings(parsed);
                 setTempSettings(parsed);
-            } catch (e) {
-                console.error('Failed to parse settings:', e);
             }
+        } catch (error) {
+            console.error('Failed to load settings:', error);
         }
     }, []);
 
-    // Toast helper
     const showToast = useCallback((message, type = 'info') => {
-        const id = Date.now();
+        toastCounterRef.current += 1;
+        const id = toastCounterRef.current;
         setToasts(prev => [...prev, { id, message, type }]);
+
         setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== id));
         }, 4000);
     }, []);
 
-    // Initialize visualizer when canvas is ready
-    useEffect(() => {
-        if (canvasRef.current && !visualizerRef.current) {
-            visualizerRef.current = new AudioVisualizer(canvasRef.current);
+    const addTranscriptEntry = useCallback((text, speaker) => {
+        const normalizedText = typeof text === 'string' ? text.trim() : '';
+        if (!normalizedText) {
+            return;
         }
-    }, [canvasRef.current]);
 
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            cleanup();
-        };
+        setTranscripts(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.speaker === speaker && last.text === normalizedText) {
+                return prev;
+            }
+
+            const next = [
+                ...prev,
+                {
+                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                    speaker,
+                    text: normalizedText
+                }
+            ];
+
+            return next.slice(-60);
+        });
     }, []);
 
-    const cleanup = () => {
-        conversationActiveRef.current = false;
-        if (visualizerRef.current) {
-            visualizerRef.current.stop();
+    useEffect(() => {
+        transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, [transcripts]);
+
+    useEffect(() => {
+        if (!canvasRef.current || visualizerRef.current) {
+            return;
         }
+        visualizerRef.current = new AudioVisualizer(canvasRef.current);
+    }, []);
+
+    const cleanupResources = useCallback(({ disconnectGemini = true } = {}) => {
+        conversationActiveRef.current = false;
+
+        visualizerRef.current?.stop();
+
         if (audioCaptureRef.current) {
             audioCaptureRef.current.stop();
             audioCaptureRef.current = null;
         }
+
         if (audioPlaybackRef.current) {
             audioPlaybackRef.current.destroy();
             audioPlaybackRef.current = null;
         }
-        if (geminiRef.current) {
-            geminiRef.current.disconnect();
-            geminiRef.current = null;
-        }
-    };
 
-    const startConversation = async () => {
+        if (geminiRef.current && disconnectGemini) {
+            geminiRef.current.disconnect();
+        }
+        geminiRef.current = null;
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            stopInProgressRef.current = true;
+            cleanupResources({ disconnectGemini: true });
+            if (visualizerRef.current) {
+                visualizerRef.current.destroy();
+                visualizerRef.current = null;
+            }
+        };
+    }, [cleanupResources]);
+
+    useEffect(() => {
+        if (!isSettingsOpen) {
+            return;
+        }
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setIsSettingsOpen(false);
+            }
+        };
+
+        const originalOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        window.addEventListener('keydown', onKeyDown);
+
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            document.body.style.overflow = originalOverflow;
+        };
+    }, [isSettingsOpen]);
+
+    const finishStoppedState = useCallback((message = READY_STATUS_MESSAGE) => {
+        setIsConversationActive(false);
+        setConnectionStatus('disconnected');
+        setStatusMessage(message);
+        setIsListening(false);
+        setIsAiSpeaking(false);
+        setIsMuted(false);
+    }, []);
+
+    const stopConversation = useCallback((options = {}) => {
+        const {
+            showEndedToast = true,
+            disconnectGemini = true,
+            nextStatusMessage = READY_STATUS_MESSAGE
+        } = options;
+
+        if (stopInProgressRef.current) {
+            return;
+        }
+
+        stopInProgressRef.current = true;
+        setConnectionStatus('disconnecting');
+        cleanupResources({ disconnectGemini });
+        finishStoppedState(nextStatusMessage);
+
+        if (showEndedToast) {
+            showToast('Conversation ended', 'info');
+        }
+
+        stopInProgressRef.current = false;
+    }, [cleanupResources, finishStoppedState, showToast]);
+
+    const startConversation = useCallback(async () => {
+        if (isConversationActive || connectionStatus === 'connecting' || stopInProgressRef.current) {
+            return;
+        }
+
+        stopInProgressRef.current = false;
         setConnectionStatus('connecting');
-        setStatusMessage('Connecting to Véra...');
+        setStatusMessage('Connecting to Vera...');
+        setIsListening(false);
+        setIsAiSpeaking(false);
+        setIsMuted(false);
+        setTranscripts([]);
 
         try {
-            // Initialize audio playback
+            const hasMicrophone = await AudioCapture.checkMicrophoneAvailable();
+            if (!hasMicrophone) {
+                throw new Error('No microphone detected. Connect a microphone and try again.');
+            }
+
             audioPlaybackRef.current = new AudioPlayback({
                 onStateChange: (state) => {
                     if (state === 'playing') {
                         setIsAiSpeaking(true);
                         setIsListening(false);
-                        setStatusMessage('Véra is speaking...');
+                        setStatusMessage('Vera is speaking...');
                     } else {
                         setIsAiSpeaking(false);
                         if (conversationActiveRef.current) {
@@ -114,60 +233,64 @@ export default function Home() {
                 }
             });
 
-            // Initialize Gemini (uses server-side API key)
             geminiRef.current = new GeminiLive({
                 systemInstruction: settings.systemInstruction,
                 onConnected: () => {
+                    if (stopInProgressRef.current) {
+                        return;
+                    }
                     setConnectionStatus('connected');
                     setStatusMessage('Listening...');
                     setIsListening(true);
-                    showToast('Connected to Véra', 'success');
+                    showToast('Connected to Vera', 'success');
                 },
                 onDisconnected: () => {
-                    if (conversationActiveRef.current) {
-                        showToast('Connection lost. Please try again.', 'warning');
-                        stopConversation();
+                    if (stopInProgressRef.current || !conversationActiveRef.current) {
+                        return;
                     }
+
+                    stopInProgressRef.current = true;
+                    cleanupResources({ disconnectGemini: false });
+                    finishStoppedState('Connection lost. Click below to reconnect.');
+                    showToast('Connection lost. Start a new call to continue.', 'warning');
+                    stopInProgressRef.current = false;
                 },
                 onAudioResponse: (data) => {
-                    if (audioPlaybackRef.current) {
-                        audioPlaybackRef.current.addToQueue(data);
-                    }
+                    audioPlaybackRef.current?.addToQueue(data);
                 },
                 onInterrupted: () => {
-                    // User interrupted Véra - stop playback immediately
-                    if (audioPlaybackRef.current) {
-                        audioPlaybackRef.current.interrupt();
-                    }
-                    // Switch to listening state
+                    audioPlaybackRef.current?.interrupt();
                     setIsAiSpeaking(false);
-                    setIsListening(true);
-                    setStatusMessage('Listening...');
+                    if (conversationActiveRef.current) {
+                        setIsListening(true);
+                        setStatusMessage('Listening...');
+                    }
+                },
+                onTranscript: (text, speaker) => {
+                    addTranscriptEntry(text, speaker === 'user' ? 'user' : 'ai');
                 },
                 onError: (error) => {
-                    console.error('Véra error:', error);
-                    showToast(error.message || 'An error occurred', 'error');
+                    console.error('Vera error:', error);
+                    showToast(getErrorMessage(error), 'error');
                 }
             });
 
-            // Connect to Gemini
             const connected = await geminiRef.current.connect();
             if (!connected) {
-                throw new Error('Failed to connect to Véra');
+                throw new Error('Failed to connect to Vera');
             }
 
-            // Initialize audio capture
             audioCaptureRef.current = new AudioCapture({
                 onAudioData: (data) => {
-                    if (geminiRef.current && geminiRef.current.isActive()) {
+                    if (geminiRef.current?.isActive()) {
                         geminiRef.current.sendAudio(data);
                     }
                 },
                 onError: (error) => {
-                    if (error.name === 'NotAllowedError') {
+                    if (error?.name === 'NotAllowedError') {
                         showToast('Microphone access denied. Please allow microphone access.', 'error');
                     } else {
-                        showToast('Failed to access microphone', 'error');
+                        showToast('Failed to access microphone.', 'error');
                     }
                 },
                 onStateChange: (state) => {
@@ -179,58 +302,96 @@ export default function Home() {
                 }
             });
 
-            // Start capturing
             const captureStarted = await audioCaptureRef.current.start();
             if (!captureStarted) {
                 throw new Error('Failed to start audio capture');
             }
 
-            // Set up visualizer
-            if (visualizerRef.current) {
-                visualizerRef.current.setSources(audioCaptureRef.current, audioPlaybackRef.current);
-                visualizerRef.current.start();
-            }
-
             setIsConversationActive(true);
             conversationActiveRef.current = true;
 
+            if (visualizerRef.current) {
+                visualizerRef.current.setSources(audioCaptureRef.current, audioPlaybackRef.current);
+                requestAnimationFrame(() => {
+                    visualizerRef.current?.resize();
+                    visualizerRef.current?.start();
+                });
+            }
         } catch (error) {
             console.error('Failed to start conversation:', error);
-            showToast(error.message || 'Failed to start conversation', 'error');
-            cleanup();
-            setConnectionStatus('disconnected');
-            setStatusMessage('Click below to start talking with Véra');
+            showToast(getErrorMessage(error), 'error');
+
+            stopInProgressRef.current = true;
+            cleanupResources({ disconnectGemini: true });
+            finishStoppedState(READY_STATUS_MESSAGE);
+            stopInProgressRef.current = false;
         }
-    };
+    }, [
+        addTranscriptEntry,
+        cleanupResources,
+        connectionStatus,
+        finishStoppedState,
+        isConversationActive,
+        settings.systemInstruction,
+        showToast
+    ]);
 
-    const stopConversation = () => {
-        cleanup();
-        setIsConversationActive(false);
-        setConnectionStatus('disconnected');
-        setStatusMessage('Click below to start talking with Véra');
-        setIsListening(false);
-        setIsAiSpeaking(false);
-        setIsMuted(false);
-        showToast('Conversation ended', 'info');
-    };
+    const toggleMute = useCallback(() => {
+        if (!audioCaptureRef.current) {
+            return;
+        }
 
-    const toggleMute = () => {
-        if (!audioCaptureRef.current) return;
         const muted = audioCaptureRef.current.toggleMute();
         setIsMuted(muted);
         showToast(muted ? 'Microphone muted' : 'Microphone unmuted', 'info');
-    };
+    }, [showToast]);
 
-    const saveSettings = () => {
-        setSettings(tempSettings);
-        localStorage.setItem('voxai-settings', JSON.stringify(tempSettings));
+    const clearTranscript = useCallback(() => {
+        setTranscripts([]);
+    }, []);
+
+    const saveSettings = useCallback(() => {
+        const nextInstruction = tempSettings.systemInstruction.trim() || DEFAULT_SYSTEM_INSTRUCTION;
+        const nextSettings = {
+            ...tempSettings,
+            systemInstruction: nextInstruction
+        };
+
+        setSettings(nextSettings);
+        setTempSettings(nextSettings);
+
+        try {
+            localStorage.setItem('voxai-settings', JSON.stringify(nextSettings));
+        } catch (error) {
+            console.error('Failed to save settings:', error);
+        }
+
         setIsSettingsOpen(false);
-        showToast('Settings saved', 'success');
-    };
+        if (isConversationActive) {
+            showToast('Settings saved. Restart the call to apply personality changes.', 'info');
+        } else {
+            showToast('Settings saved', 'success');
+        }
+    }, [isConversationActive, showToast, tempSettings]);
+
+    const isBusy = connectionStatus === 'connecting' || connectionStatus === 'disconnecting';
+    const statusText = connectionStatus === 'connected'
+        ? 'Connected'
+        : connectionStatus === 'connecting'
+            ? 'Connecting...'
+            : connectionStatus === 'disconnecting'
+                ? 'Ending...'
+                : 'Ready';
+    const actionButtonLabel = connectionStatus === 'connecting'
+        ? 'Connecting...'
+        : connectionStatus === 'disconnecting'
+            ? 'Ending...'
+            : isConversationActive
+                ? 'End Call'
+                : 'Talk to Vera';
 
     return (
         <div id="app">
-            {/* Animated Background */}
             <div className="bg-mesh"></div>
             <div className="bg-grid"></div>
             <div className="bg-orbs">
@@ -239,9 +400,7 @@ export default function Home() {
                 <div className="orb orb-3"></div>
             </div>
 
-            {/* Main Container */}
             <main className="container">
-                {/* Header */}
                 <header className="header">
                     <div className="logo">
                         <div className="logo-icon">
@@ -255,16 +414,11 @@ export default function Home() {
                     </div>
                     <div className={`connection-status ${connectionStatus}`}>
                         <span className="status-dot"></span>
-                        <span className="status-text">
-                            {connectionStatus === 'connected' ? 'Connected' :
-                                connectionStatus === 'connecting' ? 'Connecting...' : 'Ready'}
-                        </span>
+                        <span className="status-text">{statusText}</span>
                     </div>
                 </header>
 
-                {/* Conversation Panel */}
                 <section className="conversation-panel">
-                    {/* AI Avatar */}
                     <div className={`ai-avatar ${isAiSpeaking ? 'speaking' : ''} ${isListening ? 'listening' : ''}`}>
                         <div className="avatar-ring"></div>
                         <div className="avatar-core">
@@ -275,32 +429,66 @@ export default function Home() {
                         </div>
                     </div>
 
-                    {/* AI Name */}
                     <div className="ai-name">
-                        <h2>Véra</h2>
+                        <h2>Vera</h2>
                         <p>Your AI Voice Assistant</p>
                     </div>
 
-                    {/* Status Message */}
                     <div className="status-message">
                         <p>{statusMessage}</p>
                     </div>
 
-                    {/* Audio Visualizer */}
-                    <div
-                        ref={visualizerContainerRef}
-                        className={`visualizer-container ${isConversationActive ? 'active' : ''}`}
-                    >
+                    <div className={`visualizer-container ${isConversationActive ? 'active' : ''}`}>
                         <canvas ref={canvasRef} id="audioVisualizer" width="400" height="80"></canvas>
+                    </div>
+
+                    <div className={`transcript-panel ${transcripts.length > 0 ? 'active' : ''}`}>
+                        <div className="transcript-header">
+                            <h3>Live Transcript</h3>
+                            <button
+                                className="transcript-clear"
+                                onClick={clearTranscript}
+                                disabled={transcripts.length === 0}
+                                aria-label="Clear transcript"
+                            >
+                                Clear
+                            </button>
+                        </div>
+
+                        <div
+                            className="transcript-list"
+                            role="log"
+                            aria-live="polite"
+                            aria-label="Conversation transcript"
+                        >
+                            {transcripts.length === 0 ? (
+                                <p className="transcript-empty">
+                                    Transcript will appear here during your conversation.
+                                </p>
+                            ) : (
+                                transcripts.map((entry) => (
+                                    <div
+                                        key={entry.id}
+                                        className={`transcript-item ${entry.speaker === 'user' ? 'user' : 'ai'}`}
+                                    >
+                                        <span className="transcript-speaker">
+                                            {entry.speaker === 'user' ? 'You' : 'Vera'}
+                                        </span>
+                                        <p>{entry.text}</p>
+                                    </div>
+                                ))
+                            )}
+                            <div ref={transcriptEndRef} />
+                        </div>
                     </div>
                 </section>
 
-                {/* Control Panel */}
                 <section className="control-panel">
-                    {/* Main Action Button */}
                     <button
                         className={`action-btn ${isConversationActive ? 'active' : ''}`}
                         onClick={isConversationActive ? stopConversation : startConversation}
+                        disabled={isBusy}
+                        aria-busy={isBusy}
                     >
                         <div className="btn-content">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -308,19 +496,18 @@ export default function Home() {
                                 <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                                 <line x1="12" x2="12" y1="19" y2="22" />
                             </svg>
-                            <span className="btn-text">
-                                {isConversationActive ? 'End Call' : 'Talk to Véra'}
-                            </span>
+                            <span className="btn-text">{actionButtonLabel}</span>
                         </div>
                         <div className="btn-ripple"></div>
                     </button>
 
-                    {/* Secondary Controls */}
                     <div className="secondary-controls">
                         <button
                             className={`control-btn ${isMuted ? 'muted' : ''}`}
                             onClick={toggleMute}
                             title="Mute microphone"
+                            aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                            aria-pressed={isMuted}
                             disabled={!isConversationActive}
                         >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -347,6 +534,8 @@ export default function Home() {
                                 setIsSettingsOpen(true);
                             }}
                             title="Settings"
+                            aria-label="Open settings"
+                            disabled={isBusy}
                         >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="3" />
@@ -357,8 +546,11 @@ export default function Home() {
                 </section>
             </main>
 
-            {/* Settings Modal */}
-            <div className={`modal-overlay ${isSettingsOpen ? 'active' : ''}`} onClick={() => setIsSettingsOpen(false)}>
+            <div
+                className={`modal-overlay ${isSettingsOpen ? 'active' : ''}`}
+                onClick={() => setIsSettingsOpen(false)}
+                aria-hidden={!isSettingsOpen}
+            >
                 <div className="modal" onClick={e => e.stopPropagation()}>
                     <div className="modal-header">
                         <h2>Settings</h2>
@@ -372,21 +564,21 @@ export default function Home() {
                     <div className="modal-body">
                         <div className="form-group">
                             <label>API Status</label>
-                            <p className="helper-text" style={{ fontSize: '0.9rem', color: 'var(--success)' }}>
-                                🔒 Secured server-side
+                            <p className="helper-text helper-text-success">
+                                Secured through a server-side token endpoint.
                             </p>
                         </div>
                         <div className="form-group">
-                            <label>Véra&apos;s Personality</label>
+                            <label htmlFor="systemInstruction">Vera&apos;s Personality</label>
                             <textarea
                                 id="systemInstruction"
                                 rows="4"
-                                placeholder="Describe how Véra should behave..."
+                                placeholder="Describe how Vera should behave..."
                                 value={tempSettings.systemInstruction}
                                 onChange={e => setTempSettings({ ...tempSettings, systemInstruction: e.target.value })}
                             />
                             <p className="helper-text">
-                                Customize how Véra responds and interacts with you.
+                                Customize how Vera responds and interacts with you.
                             </p>
                         </div>
                     </div>
@@ -397,7 +589,6 @@ export default function Home() {
                 </div>
             </div>
 
-            {/* Toast Notifications */}
             <div className="toast-container">
                 {toasts.map(toast => (
                     <div key={toast.id} className={`toast ${toast.type}`}>
