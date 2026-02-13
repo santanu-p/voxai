@@ -46,6 +46,47 @@ function isMobileBrowser() {
     return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
+function isInAppBrowser() {
+    if (typeof navigator === 'undefined') {
+        return false;
+    }
+    const ua = navigator.userAgent || '';
+    return /FBAN|FBAV|Instagram|Line|LinkedInApp|Twitter|wv\)|WebView/i.test(ua);
+}
+
+function getMicrophoneErrorMessage(error) {
+    const errorName = error?.name || '';
+    const message = typeof error?.message === 'string' ? error.message : '';
+
+    if (errorName === 'NotAllowedError' || errorName === 'SecurityError') {
+        if (isMobileBrowser() && isInAppBrowser()) {
+            return 'Microphone access is blocked in this in-app browser. Open the site in Safari or Chrome and allow microphone permission.';
+        }
+        if (isMobileBrowser()) {
+            return 'Microphone permission is blocked. Allow microphone access in browser site settings and reload this page.';
+        }
+        return 'Microphone access denied. Please allow microphone access.';
+    }
+
+    if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+        return 'No microphone was found on this device.';
+    }
+
+    if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+        return 'Microphone is currently in use by another app. Close other apps and try again.';
+    }
+
+    if (errorName === 'OverconstrainedError') {
+        return 'This device does not support the current microphone settings. Please try again.';
+    }
+
+    if (message) {
+        return message;
+    }
+
+    return 'Failed to access microphone.';
+}
+
 function isSecureMicContext() {
     if (typeof window === 'undefined') {
         return true;
@@ -376,6 +417,11 @@ export default function Home() {
         pushToTalkPressedRef.current = false;
 
         try {
+            const micPermission = await AudioCapture.requestMicrophonePermission();
+            if (!micPermission.granted) {
+                throw new Error(getMicrophoneErrorMessage(micPermission.error));
+            }
+
             audioCaptureRef.current = new AudioCapture({
                 onAudioData: (data) => {
                     if (geminiRef.current?.isActive()) {
@@ -383,15 +429,7 @@ export default function Home() {
                     }
                 },
                 onError: (error) => {
-                    if (error?.name === 'NotAllowedError') {
-                        if (isMobileBrowser()) {
-                            showToast('Microphone access is blocked. Allow mic permission in browser site settings and reload.', 'error');
-                        } else {
-                            showToast('Microphone access denied. Please allow microphone access.', 'error');
-                        }
-                    } else {
-                        showToast('Failed to access microphone.', 'error');
-                    }
+                    showToast(getMicrophoneErrorMessage(error), 'error');
                 },
                 onStateChange: (state) => {
                     if (!conversationActiveRef.current) {
@@ -415,7 +453,11 @@ export default function Home() {
 
             const captureStarted = await audioCaptureRef.current.start();
             if (!captureStarted) {
-                throw new Error('Failed to start audio capture');
+                stopInProgressRef.current = true;
+                cleanupResources({ disconnectGemini: true });
+                finishStoppedState(READY_STATUS_MESSAGE);
+                stopInProgressRef.current = false;
+                return;
             }
 
             audioPlaybackRef.current = new AudioPlayback({
