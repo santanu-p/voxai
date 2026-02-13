@@ -7,6 +7,8 @@ Realtime voice AI assistant using Next.js + Gemini Live API.
 - Browser receives short-lived ephemeral tokens from `/api/token`.
 - Works on Vercel without a custom relay host.
 - Origin allowlist enforcement for token issuance in production.
+- Token issuance protection with per-IP/global rate limiting and in-flight caps.
+- Automatic client retry/backoff for temporary `429`/`503` spikes.
 - Security response headers from `next.config.mjs`.
 
 ## Requirements
@@ -23,6 +25,10 @@ Realtime voice AI assistant using Next.js + Gemini Live API.
 - `VOXAI_ALLOWED_ORIGINS` (required in production): comma-separated exact origins allowed to call `/api/token`.
 - `VOXAI_MODEL` (optional): Gemini model name.
 - `VOXAI_DEFAULT_VOICE` (optional): default voice name.
+- `VOXAI_TOKEN_RATE_WINDOW_MS` (optional, default `60000`): token rate limit window size.
+- `VOXAI_TOKEN_RATE_LIMIT_PER_IP` (optional, default `12`): max `/api/token` requests per IP per window.
+- `VOXAI_TOKEN_RATE_LIMIT_GLOBAL` (optional, default `300`): max total `/api/token` requests per window per server instance.
+- `VOXAI_TOKEN_MAX_INFLIGHT` (optional, default `120`): max concurrent token generation requests per server instance.
 
 ## Run
 - Development: `npm run dev`
@@ -55,4 +61,4 @@ Run:
 1. Rotate any previously exposed API keys.
 2. Set `VOXAI_ALLOWED_ORIGINS` (required in production).
 3. Serve over HTTPS.
-4. Monitor logs for repeated token endpoint errors (`403`, `500`).
+4. Tune token rate limits for expected traffic and monitor repeated `429`, `503`, and `500` errors.
