@@ -16,15 +16,15 @@ const VOICE_ALLOWLIST = new Set(['Aoede', 'Kore', 'Leda', 'Puck', 'Zephyr']);
 const CONFIG = {
     host: process.env.HOST || '0.0.0.0',
     port: Number(process.env.PORT || 3000),
-    model: process.env.VOXAI_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025',
-    defaultVoice: process.env.VOXAI_DEFAULT_VOICE || 'Aoede',
-    maxPayloadBytes: Number(process.env.VOXAI_MAX_PAYLOAD_BYTES || 4 * 1024 * 1024),
-    maxConnections: Number(process.env.VOXAI_MAX_CONNECTIONS || (isProduction ? 200 : 40)),
-    maxConnectionsPerIp: Number(process.env.VOXAI_MAX_CONNECTIONS_PER_IP || (isProduction ? 10 : 5)),
-    maxMessagesPerMinute: Number(process.env.VOXAI_MAX_MESSAGES_PER_MINUTE || 1500),
-    pingIntervalMs: Number(process.env.VOXAI_PING_INTERVAL_MS || 30000),
-    startTimeoutMs: Number(process.env.VOXAI_START_TIMEOUT_MS || 15000),
-    allowedOrigins: (process.env.VOXAI_ALLOWED_ORIGINS || '')
+    model: process.env.NOA_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025',
+    defaultVoice: process.env.NOA_DEFAULT_VOICE || 'Aoede',
+    maxPayloadBytes: Number(process.env.NOA_MAX_PAYLOAD_BYTES || 4 * 1024 * 1024),
+    maxConnections: Number(process.env.NOA_MAX_CONNECTIONS || (isProduction ? 200 : 40)),
+    maxConnectionsPerIp: Number(process.env.NOA_MAX_CONNECTIONS_PER_IP || (isProduction ? 10 : 5)),
+    maxMessagesPerMinute: Number(process.env.NOA_MAX_MESSAGES_PER_MINUTE || 1500),
+    pingIntervalMs: Number(process.env.NOA_PING_INTERVAL_MS || 30000),
+    startTimeoutMs: Number(process.env.NOA_START_TIMEOUT_MS || 15000),
+    allowedOrigins: (process.env.NOA_ALLOWED_ORIGINS || '')
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean)
@@ -94,12 +94,12 @@ function validateConfig() {
 
     const numericEntries = [
         ['PORT', CONFIG.port],
-        ['VOXAI_MAX_PAYLOAD_BYTES', CONFIG.maxPayloadBytes],
-        ['VOXAI_MAX_CONNECTIONS', CONFIG.maxConnections],
-        ['VOXAI_MAX_CONNECTIONS_PER_IP', CONFIG.maxConnectionsPerIp],
-        ['VOXAI_MAX_MESSAGES_PER_MINUTE', CONFIG.maxMessagesPerMinute],
-        ['VOXAI_PING_INTERVAL_MS', CONFIG.pingIntervalMs],
-        ['VOXAI_START_TIMEOUT_MS', CONFIG.startTimeoutMs]
+        ['NOA_MAX_PAYLOAD_BYTES', CONFIG.maxPayloadBytes],
+        ['NOA_MAX_CONNECTIONS', CONFIG.maxConnections],
+        ['NOA_MAX_CONNECTIONS_PER_IP', CONFIG.maxConnectionsPerIp],
+        ['NOA_MAX_MESSAGES_PER_MINUTE', CONFIG.maxMessagesPerMinute],
+        ['NOA_PING_INTERVAL_MS', CONFIG.pingIntervalMs],
+        ['NOA_START_TIMEOUT_MS', CONFIG.startTimeoutMs]
     ];
 
     for (const [name, value] of numericEntries) {
@@ -109,7 +109,7 @@ function validateConfig() {
     }
 
     if (isProduction && CONFIG.allowedOrigins.length === 0) {
-        throw new Error('VOXAI_ALLOWED_ORIGINS must be set in production.');
+        throw new Error('NOA_ALLOWED_ORIGINS must be set in production.');
     }
 }
 
@@ -602,7 +602,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 server.listen(CONFIG.port, CONFIG.host, () => {
-    log('info', 'VoxAI server started', {
+    log('info', 'Noa Live server started', {
         host: CONFIG.host,
         port: CONFIG.port,
         mode: dev ? 'development' : 'production',

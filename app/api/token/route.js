@@ -7,16 +7,16 @@ const NO_STORE_HEADERS = {
     Expires: '0'
 };
 const VOICE_ALLOWLIST = new Set(['Aoede', 'Kore', 'Leda', 'Puck', 'Zephyr']);
-const DEFAULT_MODEL = process.env.VOXAI_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
-const DEFAULT_VOICE = process.env.VOXAI_DEFAULT_VOICE || 'Aoede';
+const DEFAULT_MODEL = process.env.NOA_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025';
+const DEFAULT_VOICE = process.env.NOA_DEFAULT_VOICE || 'Aoede';
 const DEFAULT_SYSTEM_INSTRUCTION =
-    'You are Vera, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally with a friendly and professional tone. Be concise but thorough in your responses.';
-const RATE_LIMIT_WINDOW_MS = parsePositiveInteger(process.env.VOXAI_TOKEN_RATE_WINDOW_MS, 60_000);
-const RATE_LIMIT_PER_IP = parsePositiveInteger(process.env.VOXAI_TOKEN_RATE_LIMIT_PER_IP, 12);
-const RATE_LIMIT_GLOBAL = parsePositiveInteger(process.env.VOXAI_TOKEN_RATE_LIMIT_GLOBAL, 300);
-const MAX_INFLIGHT = parsePositiveInteger(process.env.VOXAI_TOKEN_MAX_INFLIGHT, 120);
+    'You are Noa, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally with a friendly and professional tone. Be concise but thorough in your responses.';
+const RATE_LIMIT_WINDOW_MS = parsePositiveInteger(process.env.NOA_TOKEN_RATE_WINDOW_MS, 60_000);
+const RATE_LIMIT_PER_IP = parsePositiveInteger(process.env.NOA_TOKEN_RATE_LIMIT_PER_IP, 12);
+const RATE_LIMIT_GLOBAL = parsePositiveInteger(process.env.NOA_TOKEN_RATE_LIMIT_GLOBAL, 300);
+const MAX_INFLIGHT = parsePositiveInteger(process.env.NOA_TOKEN_MAX_INFLIGHT, 120);
 const ALLOWED_ORIGINS = new Set(
-    (process.env.VOXAI_ALLOWED_ORIGINS || '')
+    (process.env.NOA_ALLOWED_ORIGINS || '')
         .split(',')
         .map((origin) => normalizeOrigin(origin.trim()))
         .filter(Boolean)
@@ -226,7 +226,7 @@ export async function POST(request) {
         });
 
         if (!token?.name) {
-            throw new Error('Gemini did not return a token');
+            throw new Error('The AI provider did not return a token');
         }
 
         return json({

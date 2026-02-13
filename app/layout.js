@@ -16,8 +16,8 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata = {
-    title: 'VoxAI - Talk to Vera',
-    description: 'Experience natural voice conversations with Vera, your intelligent voice assistant.',
+    title: 'Noa Live - Talk to Noa',
+    description: 'Experience natural voice conversations with Noa in Noa Live.',
     icons: {
         icon: '/favicon.svg',
     },

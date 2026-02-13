@@ -6,9 +6,9 @@ import { AudioPlayback } from '@/lib/audioPlayback';
 import { AudioVisualizer } from '@/lib/audioVisualizer';
 import { GeminiLive } from '@/lib/geminiLive';
 
-const READY_STATUS_MESSAGE = 'Click below to start talking with Vera';
-const SETTINGS_STORAGE_KEY = 'voxai-settings';
-const HISTORY_STORAGE_KEY = 'voxai-history';
+const READY_STATUS_MESSAGE = 'Click below to start talking with Noa';
+const SETTINGS_STORAGE_KEY = 'noa-live-settings';
+const HISTORY_STORAGE_KEY = 'noa-live-history';
 const MAX_HISTORY_ITEMS = 30;
 const MAX_TRANSCRIPT_ITEMS = 120;
 const DEFAULT_VOICE_NAME = 'Aoede';
@@ -22,7 +22,7 @@ const VOICE_OPTIONS = [
 ];
 
 const DEFAULT_SYSTEM_INSTRUCTION =
-    'You are Vera, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally with a friendly and professional tone. Be concise but thorough in your responses. Show personality and empathy in your interactions.';
+    'You are Noa, a warm, intelligent, and helpful AI voice assistant. You speak naturally and conversationally with a friendly and professional tone. Be concise but thorough in your responses. Show personality and empathy in your interactions.';
 const DEFAULT_SETTINGS = {
     systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
     voiceName: DEFAULT_VOICE_NAME,
@@ -106,6 +106,13 @@ function normalizeVoiceName(value) {
     return VOICE_OPTIONS.some((voice) => voice.value === value) ? value : DEFAULT_VOICE_NAME;
 }
 
+function migrateAssistantName(value) {
+    if (typeof value !== 'string' || !value.trim()) {
+        return DEFAULT_SYSTEM_INSTRUCTION;
+    }
+    return value.replace(/\bVera\b/g, 'Noa');
+}
+
 function formatTimestamp(value) {
     try {
         return new Date(value).toLocaleString();
@@ -131,7 +138,7 @@ function buildHistoryText(conversations) {
         ].join('\n');
 
         const transcript = (conversation.transcript || [])
-            .map((entry) => `[${entry.speaker === 'user' ? 'You' : 'Vera'}] ${entry.text}`)
+            .map((entry) => `[${entry.speaker === 'user' ? 'You' : 'Noa'}] ${entry.text}`)
             .join('\n');
 
         return `${header}${transcript}`;
@@ -194,7 +201,7 @@ export default function Home() {
             if (savedSettings) {
                 const parsedSettings = JSON.parse(savedSettings);
                 const merged = {
-                    systemInstruction: parsedSettings?.systemInstruction || DEFAULT_SYSTEM_INSTRUCTION,
+                    systemInstruction: migrateAssistantName(parsedSettings?.systemInstruction),
                     voiceName: normalizeVoiceName(parsedSettings?.voiceName),
                     conversationMode: normalizeConversationMode(parsedSettings?.conversationMode)
                 };
@@ -465,7 +472,7 @@ export default function Home() {
                     if (state === 'playing') {
                         setIsAiSpeaking(true);
                         setIsListening(false);
-                        setStatusMessage('Vera is speaking...');
+                        setStatusMessage('Noa is speaking...');
                     } else {
                         setIsAiSpeaking(false);
                         if (!conversationActiveRef.current) {
@@ -522,7 +529,7 @@ export default function Home() {
                         setStatusMessage('Listening...');
                         setIsListening(true);
                     }
-                    showToast('Connected to Vera', 'success');
+                    showToast('Connected to Noa', 'success');
                 },
                 onDisconnected: () => {
                     if (stopInProgressRef.current || !conversationActiveRef.current) {
@@ -563,14 +570,14 @@ export default function Home() {
                     addTranscriptEntry(text, speaker === 'user' ? 'user' : 'ai');
                 },
                 onError: (error) => {
-                    console.error('Vera error:', error);
+                    console.error('Noa error:', error);
                     showToast(getErrorMessage(error), 'error');
                 }
             });
 
             const connected = await geminiRef.current.connect();
             if (!connected) {
-                throw new Error('Failed to connect to Vera');
+                throw new Error('Failed to connect to Noa');
             }
 
             if (settingsRef.current.conversationMode === 'push-to-talk') {
@@ -646,7 +653,7 @@ export default function Home() {
         setIsListening(false);
 
         if (conversationActiveRef.current) {
-            setStatusMessage(isAiSpeaking ? 'Vera is speaking...' : 'Hold to talk and speak.');
+            setStatusMessage(isAiSpeaking ? 'Noa is speaking...' : 'Hold to talk and speak.');
         }
     }, [isAiSpeaking]);
 
@@ -676,7 +683,7 @@ export default function Home() {
         }
 
         downloadFile(
-            `voxai-history-${Date.now()}.json`,
+            `noa-live-history-${Date.now()}.json`,
             JSON.stringify(conversationHistory, null, 2),
             'application/json'
         );
@@ -690,7 +697,7 @@ export default function Home() {
         }
 
         downloadFile(
-            `voxai-history-${Date.now()}.txt`,
+            `noa-live-history-${Date.now()}.txt`,
             buildHistoryText(conversationHistory),
             'text/plain'
         );
@@ -746,7 +753,7 @@ export default function Home() {
             ? 'Ending...'
             : isConversationActive
                 ? 'End Call'
-                : 'Talk to Vera';
+                : 'Talk to Noa';
 
     return (
         <div id="app">
@@ -768,7 +775,7 @@ export default function Home() {
                                 <line x1="12" x2="12" y1="19" y2="22" />
                             </svg>
                         </div>
-                        <h1>VoxAI</h1>
+                        <h1>Noa Live</h1>
                     </div>
                     <div className={`connection-status ${connectionStatus}`}>
                         <span className="status-dot"></span>
@@ -788,7 +795,7 @@ export default function Home() {
                     </div>
 
                     <div className="ai-name">
-                        <h2>Vera</h2>
+                        <h2>Noa</h2>
                         <p>Your AI Voice Assistant</p>
                     </div>
 
@@ -830,7 +837,7 @@ export default function Home() {
                                         className={`transcript-item ${entry.speaker === 'user' ? 'user' : 'ai'}`}
                                     >
                                         <span className="transcript-speaker">
-                                            {entry.speaker === 'user' ? 'You' : 'Vera'}
+                                            {entry.speaker === 'user' ? 'You' : 'Noa'}
                                         </span>
                                         <p>{entry.text}</p>
                                     </div>
@@ -951,7 +958,7 @@ export default function Home() {
                         <div className="form-group">
                             <label>API Status</label>
                             <p className="helper-text helper-text-success">
-                                Vercel token endpoint enabled. Gemini key stays server-side.
+                                Vercel token endpoint enabled. API key stays server-side.
                             </p>
                         </div>
 
@@ -989,16 +996,16 @@ export default function Home() {
                         </div>
 
                         <div className="form-group">
-                            <label htmlFor="systemInstruction">Vera&apos;s Personality</label>
+                            <label htmlFor="systemInstruction">Noa&apos;s Personality</label>
                             <textarea
                                 id="systemInstruction"
                                 rows="4"
-                                placeholder="Describe how Vera should behave..."
+                                placeholder="Describe how Noa should behave..."
                                 value={tempSettings.systemInstruction}
                                 onChange={e => setTempSettings({ ...tempSettings, systemInstruction: e.target.value })}
                             />
                             <p className="helper-text">
-                                Customize how Vera responds and interacts with you.
+                                Customize how Noa responds and interacts with you.
                             </p>
                         </div>
 
