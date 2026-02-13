@@ -6,10 +6,10 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "node server.mjs --dev",
+    "dev": "next dev",
     "build": "next build",
-    "start": "node server.mjs",
-    "start:prod": "npm run build && node server.mjs",
+    "start": "next start",
+    "start:prod": "npm run build && npm run start",
     "lint": "eslint ."
   },
   "dependencies": {

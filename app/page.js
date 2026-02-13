@@ -28,7 +28,6 @@ const DEFAULT_SETTINGS = {
     voiceName: DEFAULT_VOICE_NAME,
     conversationMode: DEFAULT_MODE
 };
-const PUBLIC_RELAY_URL = process.env.NEXT_PUBLIC_RELAY_WS_URL || '';
 
 function getErrorMessage(error) {
     if (error instanceof Error && error.message) {
@@ -195,16 +194,6 @@ export default function Home() {
             setToasts(prev => prev.filter(t => t.id !== id));
         }, 4000);
     }, []);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-        const isVercelHost = window.location.hostname.endsWith('.vercel.app');
-        if (isVercelHost && !PUBLIC_RELAY_URL) {
-            showToast('Relay is not configured for Vercel. Set NEXT_PUBLIC_RELAY_WS_URL to an external relay websocket URL.', 'warning');
-        }
-    }, [showToast]);
 
     const addTranscriptEntry = useCallback((text, speaker) => {
         const normalizedText = typeof text === 'string' ? text.trim() : '';
@@ -539,7 +528,7 @@ export default function Home() {
 
             const connected = await geminiRef.current.connect();
             if (!connected) {
-                throw new Error('Failed to connect to Vera relay');
+                throw new Error('Failed to connect to Vera');
             }
 
             if (settingsRef.current.conversationMode === 'push-to-talk') {
@@ -702,12 +691,6 @@ export default function Home() {
 
     const isBusy = connectionStatus === 'connecting' || connectionStatus === 'disconnecting';
     const isPushToTalkMode = settings.conversationMode === 'push-to-talk';
-    const isVercelHost = typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app');
-    const relayConfigured = !!PUBLIC_RELAY_URL || !isVercelHost;
-    const relayStatusText = relayConfigured
-        ? 'Realtime relay configured. API key stays server-side.'
-        : 'Vercel requires NEXT_PUBLIC_RELAY_WS_URL pointing to an external relay server.';
-    const relayStatusClass = relayConfigured ? 'helper-text helper-text-success' : 'helper-text helper-text-warning';
     const statusText = connectionStatus === 'connected'
         ? 'Connected'
         : connectionStatus === 'connecting'
@@ -925,8 +908,8 @@ export default function Home() {
                     <div className="modal-body">
                         <div className="form-group">
                             <label>API Status</label>
-                            <p className={relayStatusClass}>
-                                {relayStatusText}
+                            <p className="helper-text helper-text-success">
+                                Vercel token endpoint enabled. Gemini key stays server-side.
                             </p>
                         </div>
 
